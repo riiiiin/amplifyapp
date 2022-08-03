@@ -1,93 +1,80 @@
-import React, { useState, useEffect } from 'react';
-import './App.css';
-import { withAuthenticator, AmplifySignOut } from '@aws-amplify/ui-react';
-import { listNotes } from './graphql/queries';
-import { createNote as createNoteMutation, deleteNote as deleteNoteMutation } from './graphql/mutations';
-import { API, Storage } from 'aws-amplify';
+import React, { useEffect, useState } from 'react'
+import Amplify, { API, graphqlOperation } from 'aws-amplify'
+import { createNote } from './graphql/mutations'
+import { listNotes } from './graphql/queries'
 
-const initialFormState = { name: '', description: '' }
+import awsExports from "./aws-exports";
+Amplify.configure(awsExports);
 
-function App() {
-  const [notes, setNotes] = useState([]);
-  const [formData, setFormData] = useState(initialFormState);
+const initialState = { name: '', description: '' }
+
+const App = () => {
+  const [formState, setFormState] = useState(initialState)
+  const [Notes, setNotes] = useState([])
 
   useEffect(() => {
-    fetchNotes();
-  }, []);
+    fetchNotes()
+  }, [])
+
+  function setInput(key, value) {
+    setFormState({ ...formState, [key]: value })
+  }
 
   async function fetchNotes() {
-    const apiData = await API.graphql({ query: listNotes });
-    const notesFromAPI = apiData.data.listNotes.items;
-    await Promise.all(notesFromAPI.map(async note => {
-      if (note.image) {
-        const image = await Storage.get(note.image);
-        note.image = image;
-      }
-      return note;
-    }))
-    setNotes(apiData.data.listNotes.items);
+    try {
+      const NoteData = await API.graphql(graphqlOperation(listNotes))
+      const Notes = NoteData.data.listNotes.items
+      setNotes(Notes)
+    } catch (err) { console.log('error fetching Notes') }
   }
 
-  async function createNote() {
-    if (!formData.name || !formData.description) return;
-    await API.graphql({ query: createNoteMutation, variables: { input: formData } });
-    if (formData.image) {
-      const image = await Storage.get(formData.image);
-      formData.image = image;
+  async function addNote() {
+    try {
+      if (!formState.name || !formState.description) return
+      const Note = { ...formState }
+      setNotes([...Notes, Note])
+      setFormState(initialState)
+      await API.graphql(graphqlOperation(createNote, {input: Note}))
+    } catch (err) {
+      console.log('error creating Note:', err)
     }
-    setNotes([ ...notes, formData ]);
-    setFormData(initialFormState);
-  }
-
-  async function deleteNote({ id }) {
-    const newNotesArray = notes.filter(note => note.id !== id);
-    setNotes(newNotesArray);
-    await API.graphql({ query: deleteNoteMutation, variables: { input: { id } }});
-  }
-
-  async function onChange(e) {
-    if (!e.target.files[0]) return
-    const file = e.target.files[0];
-    setFormData({ ...formData, image: file.name });
-    await Storage.put(file.name, file);
-    fetchNotes();
   }
 
   return (
-    <div className="App">
-      <h1>My Notes App</h1>
+    <div style={styles.container}>
+      <h2>Amplify Notes</h2>
       <input
-        onChange={e => setFormData({ ...formData, 'name': e.target.value})}
-        placeholder="Note name"
-        value={formData.name}
+        onChange={event => setInput('name', event.target.value)}
+        style={styles.input}
+        value={formState.name}
+        placeholder="Name"
       />
       <input
-        onChange={e => setFormData({ ...formData, 'description': e.target.value})}
-        placeholder="Note description"
-        value={formData.description}
+        onChange={event => setInput('description', event.target.value)}
+        style={styles.input}
+        value={formState.description}
+        placeholder="Description"
       />
-      <input
-        type="file"
-        onChange={onChange}
-      />
-      <button onClick={createNote}>Create Note</button>
-      <div style={{marginBottom: 30}}>
+      <button style={styles.button} onClick={addNote}>Create Note</button>
       {
-        notes.map(note => (
-          <div key={note.id || note.name}>
-            <h2>{note.name}</h2>
-            <p>{note.description}</p>
-            <button onClick={() => deleteNote(note)}>Delete note</button>
-            {
-              note.image && <img src={note.image} style={{width: 400}} />
-            }
+        Notes.map((Note, index) => (
+          <div key={Note.id ? Note.id : index} style={styles.Note}>
+            <p style={styles.NoteName}>{Note.name}</p>
+            <p style={styles.NoteDescription}>{Note.description}</p>
           </div>
         ))
       }
-      </div>
-      <AmplifySignOut />
     </div>
-  );
+  )
 }
 
-export default withAuthenticator(App);
+const styles = {
+  container: { width: 400, margin: '0 auto', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: 20 },
+  Note: {  marginBottom: 15 },
+  input: { border: 'none', backgroundColor: '#ddd', marginBottom: 10, padding: 8, fontSize: 18 },
+  NoteName: { fontSize: 20, fontWeight: 'bold' },
+  NoteDescription: { marginBottom: 0 },
+  button: { backgroundColor: 'black', color: 'white', outline: 'none', fontSize: 18, padding: '12px 0px' }
+}
+
+export default App
